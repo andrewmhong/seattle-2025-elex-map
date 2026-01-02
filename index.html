@@ -1,0 +1,1071 @@
+<!-- ✅ Drop-in replacement for your index.html.
+     It adds a dataset toggle (Neighborhoods vs Precincts) while keeping everything else the same:
+     - hover info panel
+     - click-to-pin (freeze) + bold panel outline
+     - citywide default when not hovering
+     - race menu to color shapes + legend
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seattle 2025 Election Results</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #f5f5f5;
+    }
+
+    #map { width: 100%; height: 100vh; }
+
+    .loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 2000;
+    }
+
+    .info-panel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      max-width: 400px;
+      max-height: 95vh;
+      overflow-y: auto;
+      z-index: 1000;
+      display: none;
+
+      /* default outline */
+      border: 2px solid rgba(0,0,0,0.08);
+    }
+
+    .info-panel.visible { display: block; }
+    .info-panel.pinned { border: 4px solid #0066cc; }
+
+    .info-panel h2 {
+      margin-bottom: 6px;
+      color: #333;
+      font-size: 20px;
+      border-bottom: 2px solid #0066cc;
+      padding-bottom: 5px;
+    }
+
+    .info-subtitle {
+      margin: 8px 0 12px 0;
+      color: #666;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .race-section {
+      margin-bottom: 10px;
+      padding: 5px;
+      background: #f9f9f9;
+      border-radius: 5px;
+      border-left: 3px solid #0066cc;
+    }
+
+    .race-title {
+      font-weight: bold;
+      color: #0066cc;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .candidate-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
+
+    .candidate-name {
+      font-weight: 500;
+      font-size: 12px;
+      color: #333;
+    }
+
+    .candidate-stats {
+      text-align: right;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .candidate-percent {
+      font-weight: bold;
+      color: #0066cc;
+    }
+
+    /* --- Left menu panel (dataset toggle + race menu) --- */
+    .race-menu {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 12px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 1200;
+      width: 280px;
+      max-height: 80vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .race-menu h3 {
+      font-size: 14px;
+      color: #333;
+      margin: 0;
+    }
+
+    .dataset-toggle {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .dataset-toggle .label {
+      font-size: 12px;
+      color: #666;
+      font-weight: 600;
+      margin-right: 4px;
+    }
+
+    .dataset-toggle button {
+      cursor: pointer;
+      border: 1px solid rgba(0,0,0,0.12);
+      background: white;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+
+    .dataset-toggle button.active {
+      background: rgba(0,102,204,0.12);
+      border: 1px solid rgba(0,102,204,0.35);
+      font-weight: 700;
+    }
+
+    .menu-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .menu-actions button {
+      cursor: pointer;
+      border: 1px solid rgba(0,0,0,0.12);
+      background: white;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+
+    .menu-actions button:hover,
+    .dataset-toggle button:hover {
+      background: #f3f3f3;
+    }
+
+    .race-list {
+      overflow-y: auto;
+      border-top: 1px solid #eee;
+      padding-top: 8px;
+    }
+
+    .race-item {
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #333;
+      line-height: 1.25;
+      margin-bottom: 4px;
+      background: #f7f7f7;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+
+    .race-item:hover { background: #efefef; }
+    .race-item.selected {
+      background: rgba(0,102,204,0.12);
+      border: 1px solid rgba(0,102,204,0.35);
+      font-weight: 600;
+    }
+
+    /* --- Legend popup (bottom-left) --- */
+    .race-legend {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      background: white;
+      padding: 10px 12px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 1200;
+      font-size: 12px;
+      display: none;
+      max-width: 320px;
+    }
+    .race-legend.visible { display: block; }
+
+    .legend-title { font-weight: 700; margin-bottom: 6px; color: #333; }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.15);
+      flex: 0 0 auto;
+    }
+    .legend-note { margin-top: 8px; color: #666; font-size: 11px; }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+  <div class="loading" id="loading">Loading election data...</div>
+
+  <!-- Left menu: dataset toggle + races -->
+  <div class="race-menu" id="raceMenu">
+    <h3>Map controls</h3>
+
+    <div class="dataset-toggle">
+      <span class="label">Geography:</span>
+      <button id="btnNeighborhoods" type="button" class="active">Neighborhoods</button>
+      <button id="btnPrecincts" type="button">Precincts</button>
+    </div>
+
+    <div class="menu-actions">
+      <button id="clearRaceBtn" type="button">Clear race selection</button>
+    </div>
+
+    <div>
+      <h3 style="margin:0; font-size:14px;">Color shapes by race</h3>
+      <div class="race-list" id="raceList"></div>
+    </div>
+  </div>
+
+  <!-- Info panel -->
+  <div class="info-panel" id="infoPanel">
+    <h2 id="neighborhoodName">Area</h2>
+    <div id="neighborhoodTurnout" class="info-subtitle"></div>
+    <div id="infoContent"></div>
+  </div>
+
+  <!-- Legend -->
+  <div class="race-legend" id="raceLegend"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // -----------------------------
+    // Map init
+    // -----------------------------
+    const map = L.map('map').setView([47.6062, -122.3321], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Dataset files
+    const DATASETS = {
+      neighborhoods: {
+        key: 'neighborhoods',
+        label: 'Neighborhoods',
+        url: 'seattle_2025_election_by_neighborhood.geojson'
+      },
+      precincts: {
+        key: 'precincts',
+        label: 'Precincts',
+        url: 'seattle_2025_election_by_precinct.geojson'
+      }
+    };
+
+    const PIN_OUTLINE_COLOR = '#0066cc';
+    const PIN_OUTLINE_WEIGHT = 5;
+
+    let pinnedLayer = null;  
+
+    let activeDatasetKey = 'neighborhoods';
+    let electionData = null;
+
+    let geojsonLayer = null;
+
+    // Pin/freeze
+    let pinned = false;
+    let pinnedFeature = null;
+
+    // Citywide pseudo-feature
+    let citywideFeature = null;
+
+    // Race coloring selection
+    let selectedRaceName = null;
+    let selectedRaceConfig = null; // { greenCandidate, orangeCandidate, maxPct }
+
+    // Colors
+    const GREEN = '#2ecc71';
+    const ORANGE = '#ff8c00';
+    const WHITE = '#ffffff';
+
+    // -----------------------------
+    // Load + initialize
+    // -----------------------------
+    init();
+
+    function init() {
+      wireDatasetButtons();
+      wireClearRaceButton();
+      loadDataset(activeDatasetKey);
+    }
+
+    function wireDatasetButtons() {
+      const btnN = document.getElementById('btnNeighborhoods');
+      const btnP = document.getElementById('btnPrecincts');
+
+      btnN.addEventListener('click', () => {
+        if (activeDatasetKey !== 'neighborhoods') {
+          activeDatasetKey = 'neighborhoods';
+          btnN.classList.add('active');
+          btnP.classList.remove('active');
+          loadDataset(activeDatasetKey);
+        }
+      });
+
+      btnP.addEventListener('click', () => {
+        if (activeDatasetKey !== 'precincts') {
+          activeDatasetKey = 'precincts';
+          btnP.classList.add('active');
+          btnN.classList.remove('active');
+          loadDataset(activeDatasetKey);
+        }
+      });
+    }
+
+    function wireClearRaceButton() {
+      document.getElementById('clearRaceBtn').addEventListener('click', () => {
+        setSelectedRace(null);
+        updateRaceMenuSelectionUI();
+      });
+    }
+
+    function setLoading(text) {
+      const el = document.getElementById('loading');
+      el.textContent = text;
+      el.style.display = 'block';
+    }
+
+    function clearLoading() {
+      document.getElementById('loading').style.display = 'none';
+    }
+
+    function applyPinnedOutline(layer) {
+      if (!layer) return;
+      layer.setStyle({
+        color: PIN_OUTLINE_COLOR,
+        weight: PIN_OUTLINE_WEIGHT,
+        opacity: 1
+      });
+      if (layer.bringToFront) layer.bringToFront();
+    }
+
+    function clearPinnedOutline() {
+      if (!pinnedLayer || !geojsonLayer) return;
+      geojsonLayer.resetStyle(pinnedLayer);
+      pinnedLayer = null;
+    }
+    // function clearPinnedOutline() {
+    //   if (!pinnedLayer) return;
+    //   // reset back to the layer's normal style (whatever mapStyle says right now)
+    //   geojsonLayer.resetStyle(pinnedLayer);
+    //   pinnedLayer = null;
+    // }
+
+    async function loadDataset(datasetKey) {
+      // Reset state (keep UI)
+      setLoading(`Loading ${DATASETS[datasetKey].label}...`);
+
+      clearPinnedOutline();
+      pinned = false;
+      pinnedFeature = null;
+      document.getElementById('infoPanel').classList.remove('pinned');
+
+      // keep selectedRaceName if you want; but menu must rebuild & config recompute.
+      // We'll keep selection but validate it after loading.
+      const raceToReapply = selectedRaceName;
+
+      // Remove previous layer
+      if (geojsonLayer) {
+        geojsonLayer.remove();
+        geojsonLayer = null;
+      }
+
+      // Fetch dataset
+      const url = DATASETS[datasetKey].url;
+      const resp = await fetch(url);
+      electionData = await resp.json();
+
+      // Process + compute citywide for THIS dataset
+      processElectionData();
+      computeCitywideFeature();
+
+      // Rebuild race menu for THIS dataset
+      buildRaceMenu();
+
+      // Re-add layer
+      displayMap();
+
+      // Re-apply race selection if still present
+      if (raceToReapply) {
+        // only reapply if this dataset includes that race name
+        const hasRace = (citywideFeature?.processedData?.races || []).some(r => r.name === raceToReapply);
+        if (hasRace) {
+          setSelectedRace(raceToReapply);
+          updateRaceMenuSelectionUI();
+        } else {
+          setSelectedRace(null);
+          updateRaceMenuSelectionUI();
+        }
+      } else {
+        setSelectedRace(null);
+        updateRaceMenuSelectionUI();
+      }
+
+      // Default info state
+      showCitywide();
+      document.getElementById('infoPanel').classList.add('visible');
+
+      // Fit bounds for new layer
+      if (geojsonLayer) map.fitBounds(geojsonLayer.getBounds());
+
+      clearLoading();
+    }
+
+    // -----------------------------
+    // Column parsing
+    // -----------------------------
+    function parseColumnName(colName) {
+      const skipColumns = [
+        'neighborhood', 'neighborho', 'geometry', 'OBJECTID', 'votdst', 'NAME', 'SUM_VOTERS',
+        'Shape_Leng', 'Shape_Area', 'precinct_id', 'precinct_i', 'PRECINCT', 'Precinct', 'precinct',
+        'VOTDST', 'VOTDST_ID', 'votdst_id', 'VTD', 'vtd', 'VTD_ID', 'vtd_id'
+      ];
+      if (skipColumns.includes(colName)) return null;
+
+      const parts = colName.split('_');
+
+      const statistics = [
+        'Registered_Voters',
+        'Times_Counted',
+        'Times_Over_Voted',
+        'Times_Under_Voted',
+        'Write_in',
+        'Approved',
+        'Rejected'
+      ];
+
+      let isStatistic = false;
+      let statisticName = null;
+      for (const stat of statistics) {
+        if (colName.endsWith('_' + stat) || colName === stat) {
+          isStatistic = true;
+          statisticName = stat.replace(/_/g, ' ');
+          break;
+        }
+      }
+
+      if (isStatistic) {
+        const statPartsUnderscore = statisticName.replace(/ /g, '_').split('_');
+        let statStartIdx = -1;
+
+        for (let i = parts.length - statPartsUnderscore.length; i >= 0; i--) {
+          const testParts = parts.slice(i, i + statPartsUnderscore.length);
+          if (testParts.join('_') === statPartsUnderscore.join('_')) {
+            statStartIdx = i;
+            break;
+          }
+        }
+
+        if (statStartIdx > 0) {
+          const raceParts = parts.slice(0, statStartIdx);
+          const raceName = raceParts.join('_').replace(/_/g, ' ');
+          return { type: 'statistic', race: raceName, statistic: statisticName, column: colName };
+        }
+      }
+
+      const raceEndPatterns = [
+        'Position_No',
+        'District_No',
+        'Proposition_No',
+        'City_Attorney',
+        'Mayor',
+        'Executive'
+      ];
+
+      let raceEndIdx = -1;
+      for (const pattern of raceEndPatterns) {
+        const patternParts = pattern.split('_');
+        for (let i = parts.length - patternParts.length; i >= 0; i--) {
+          const testParts = parts.slice(i, i + patternParts.length);
+          if (testParts.join('_') === pattern) {
+            const nextIdx = i + patternParts.length;
+            if (nextIdx < parts.length && /^\d+$/.test(parts[nextIdx])) {
+              raceEndIdx = nextIdx + 1;
+            } else {
+              raceEndIdx = nextIdx;
+            }
+            break;
+          }
+        }
+        if (raceEndIdx > 0) break;
+      }
+
+      if (raceEndIdx > 0 && raceEndIdx < parts.length) {
+        const raceParts = parts.slice(0, raceEndIdx);
+        const candidateParts = parts.slice(raceEndIdx);
+        return {
+          type: 'candidate',
+          race: raceParts.join('_').replace(/_/g, ' '),
+          candidate: candidateParts.join('_').replace(/_/g, ' '),
+          column: colName
+        };
+      }
+
+      if (parts.length >= 4) {
+        const candidateParts = parts.slice(-2);
+        const raceParts = parts.slice(0, -2);
+        return {
+          type: 'candidate',
+          race: raceParts.join('_').replace(/_/g, ' '),
+          candidate: candidateParts.join('_').replace(/_/g, ' '),
+          column: colName
+        };
+      }
+
+      const raceParts = parts.slice(0, -1);
+      return {
+        type: 'candidate',
+        race: raceParts.join('_').replace(/_/g, ' '),
+        candidate: parts[parts.length - 1].replace(/_/g, ' '),
+        column: colName
+      };
+    }
+
+    // -----------------------------
+    // Per-feature processing
+    // -----------------------------
+    function processElectionData() {
+      if (!electionData || !electionData.features) return;
+
+      electionData.features.forEach(feature => {
+        const properties = feature.properties || {};
+        const races = {};
+
+        Object.keys(properties).forEach(colName => {
+          const parsed = parseColumnName(colName);
+          if (!parsed) return;
+
+          const raceName = parsed.race;
+          if (!races[raceName]) {
+            races[raceName] = { name: raceName, candidates: [], registeredVoters: 0, timesCounted: 0 };
+          }
+
+          const value = Number(properties[colName] || 0);
+
+          if (parsed.type === 'candidate') {
+            races[raceName].candidates.push({ name: parsed.candidate, votes: value, column: parsed.column });
+          } else if (parsed.statistic === 'Registered Voters') {
+            races[raceName].registeredVoters = value;
+          } else if (parsed.statistic === 'Times Counted') {
+            races[raceName].timesCounted = value;
+          }
+        });
+
+        Object.values(races).forEach(race => {
+          race.candidates.sort((a, b) => b.votes - a.votes);
+          race.totalVotes = race.candidates.reduce((sum, c) => sum + c.votes, 0);
+          race.candidates.forEach(candidate => {
+            candidate.percent = race.totalVotes > 0 ? ((candidate.votes / race.totalVotes) * 100).toFixed(1) : '0.0';
+          });
+        });
+
+        feature.processedData = { races: Object.values(races) };
+      });
+    }
+
+    // -----------------------------
+    // Citywide aggregation for current dataset
+    // -----------------------------
+    function computeCitywideFeature() {
+      if (!electionData || !electionData.features) return;
+
+      const racesAgg = {};
+      const cityProps = {
+        neighborhood: 'Citywide',
+        City_of_Seattle_City_Attorney_Registered_Voters: 0,
+        City_of_Seattle_City_Attorney_Times_Counted: 0
+      };
+
+      electionData.features.forEach(f => {
+        const props = f.properties || {};
+
+        cityProps.City_of_Seattle_City_Attorney_Registered_Voters += Number(props['City_of_Seattle_City_Attorney_Registered_Voters'] || 0);
+        cityProps.City_of_Seattle_City_Attorney_Times_Counted += Number(props['City_of_Seattle_City_Attorney_Times_Counted'] || 0);
+
+        Object.keys(props).forEach(colName => {
+          const parsed = parseColumnName(colName);
+          if (!parsed) return;
+
+          const raceName = parsed.race;
+          if (!racesAgg[raceName]) {
+            racesAgg[raceName] = { name: raceName, candidates: {}, registeredVoters: 0, timesCounted: 0 };
+          }
+
+          const v = Number(props[colName] || 0);
+
+          if (parsed.type === 'candidate') {
+            racesAgg[raceName].candidates[parsed.candidate] = (racesAgg[raceName].candidates[parsed.candidate] || 0) + v;
+          } else if (parsed.statistic === 'Registered Voters') {
+            racesAgg[raceName].registeredVoters += v;
+          } else if (parsed.statistic === 'Times Counted') {
+            racesAgg[raceName].timesCounted += v;
+          }
+        });
+      });
+
+      const racesList = Object.values(racesAgg).map(r => {
+        const candidates = Object.entries(r.candidates)
+          .map(([name, votes]) => ({ name, votes }))
+          .sort((a, b) => b.votes - a.votes);
+
+        const totalVotes = candidates.reduce((s, c) => s + c.votes, 0);
+        candidates.forEach(c => {
+          c.percent = totalVotes > 0 ? ((c.votes / totalVotes) * 100).toFixed(1) : '0.0';
+        });
+
+        return { name: r.name, candidates, totalVotes, registeredVoters: r.registeredVoters, timesCounted: r.timesCounted };
+      });
+
+      citywideFeature = { properties: cityProps, processedData: { races: racesList } };
+    }
+
+    // -----------------------------
+    // Feature/race helpers
+    // -----------------------------
+    function getRaceObjFromFeature(feature, raceName) {
+      const races = feature?.processedData?.races || [];
+      return races.find(r => r.name === raceName) || null;
+    }
+
+    function computeMaxPctForRace(raceName) {
+      let maxPct = 50.0;
+
+      for (const f of (electionData?.features || [])) {
+        const r = getRaceObjFromFeature(f, raceName);
+        if (!r || !r.candidates || r.candidates.length === 0) continue;
+
+        const total = Number(r.totalVotes || 0);
+        if (total <= 0) continue;
+
+        for (const c of r.candidates) {
+          const pct = (Number(c.votes || 0) / total) * 100.0;
+          if (pct > maxPct) maxPct = pct;
+        }
+      }
+      return maxPct;
+    }
+
+    function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+
+    function hexToRgb(hex) {
+      const h = hex.replace('#', '');
+      const full = h.length === 3 ? h.split('').map(ch => ch + ch).join('') : h;
+      const n = parseInt(full, 16);
+      return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+    }
+
+    function rgbToHex(r, g, b) {
+      const toHex = v => v.toString(16).padStart(2, '0');
+      return '#' + toHex(r) + toHex(g) + toHex(b);
+    }
+
+    function lerpColor(hexA, hexB, t) {
+      const a = hexToRgb(hexA);
+      const b = hexToRgb(hexB);
+      const r = Math.round(a.r + (b.r - a.r) * t);
+      const g = Math.round(a.g + (b.g - a.g) * t);
+      const bb = Math.round(a.b + (b.b - a.b) * t);
+      return rgbToHex(r, g, bb);
+    }
+
+    function winnerForFeature(feature, raceName) {
+      const race = getRaceObjFromFeature(feature, raceName);
+      if (!race || !race.candidates || race.candidates.length === 0) return null;
+
+      const total = Number(race.totalVotes || 0);
+      if (total <= 0) return null;
+
+      let best = race.candidates[0];
+      for (const c of race.candidates) {
+        if (Number(c.votes || 0) > Number(best.votes || 0)) best = c;
+      }
+      const pct = (Number(best.votes || 0) / total) * 100.0;
+      return { winnerName: best.name, pct };
+    }
+
+    // -----------------------------
+    // Info panel rendering
+    // -----------------------------
+    function renderFeature(feature) {
+      const panel = document.getElementById('infoPanel');
+      const nameEl = document.getElementById('neighborhoodName');
+      const turnoutEl = document.getElementById('neighborhoodTurnout');
+      const contentEl = document.getElementById('infoContent');
+
+      const areaName = feature.properties.neighborhood ||
+                       feature.properties.neighborho ||
+                       feature.properties.NAME ||
+                       feature.properties.PRECINCT ||
+                       feature.properties.PRECINCT_N ||
+                       'Unknown Area';
+
+      nameEl.textContent = areaName;
+
+      // City Attorney turnout subtitle (works for both datasets as long as these columns exist)
+      const props = feature.properties || {};
+      const rv = Number(props['City_of_Seattle_City_Attorney_Registered_Voters']);
+      const tc = Number(props['City_of_Seattle_City_Attorney_Times_Counted']);
+
+      turnoutEl.textContent =
+        (Number.isFinite(rv) && rv > 0 && Number.isFinite(tc) && tc >= 0)
+          ? `Turnout: ${((tc / rv) * 100).toFixed(1)}%`
+          : 'Turnout: N/A';
+
+      const data = feature.processedData;
+      if (!data || !data.races || data.races.length === 0) {
+        contentEl.innerHTML = '<p>No election data available.</p>';
+        panel.classList.add('visible');
+        return;
+      }
+
+      let html = '';
+      data.races.forEach(race => {
+        html += `<div class="race-section">`;
+        html += `<div class="race-title"><strong>${race.name}</strong></div>`;
+        race.candidates.forEach(candidate => {
+          html += `
+            <div class="candidate-row">
+              <span class="candidate-name">${candidate.name}:</span>
+              <span class="candidate-stats">
+                <span class="candidate-percent">${candidate.percent}%</span>
+                <span> (${Number(candidate.votes).toLocaleString()} votes)</span>
+              </span>
+            </div>
+          `;
+        });
+        html += `</div>`;
+      });
+
+      contentEl.innerHTML = html;
+      panel.classList.add('visible');
+    }
+
+    function showCitywide() {
+      if (!citywideFeature) return;
+      renderFeature(citywideFeature);
+    }
+
+    // -----------------------------
+    // Race menu + legend
+    // -----------------------------
+    function buildRaceMenu() {
+      const listEl = document.getElementById('raceList');
+      listEl.innerHTML = '';
+
+      const raceNames = (citywideFeature?.processedData?.races || [])
+        .map(r => r.name)
+        .sort((a, b) => a.localeCompare(b));
+
+      raceNames.forEach(raceName => {
+        const item = document.createElement('div');
+        item.className = 'race-item';
+        item.textContent = raceName;
+
+        item.addEventListener('click', () => {
+          if (selectedRaceName === raceName) setSelectedRace(null);
+          else setSelectedRace(raceName);
+          updateRaceMenuSelectionUI();
+        });
+
+        listEl.appendChild(item);
+      });
+
+      updateRaceMenuSelectionUI();
+    }
+
+    function updateRaceMenuSelectionUI() {
+      const items = document.querySelectorAll('#raceList .race-item');
+      items.forEach(el => {
+        const name = el.textContent;
+        el.classList.toggle('selected', selectedRaceName === name);
+      });
+    }
+
+    function setSelectedRace(raceNameOrNull) {
+      selectedRaceName = raceNameOrNull;
+
+      if (!selectedRaceName) {
+        selectedRaceConfig = null;
+        hideLegend();
+        if (geojsonLayer) geojsonLayer.setStyle(mapStyle);
+        return;
+      }
+
+      // Stable mapping: citywide top-2 => green/orange
+      const cityRace = getRaceObjFromFeature(citywideFeature, selectedRaceName);
+      const top2 = (cityRace?.candidates || []).slice(0, 2);
+
+      const greenCandidate = top2[0]?.name || '(Top candidate)';
+      const orangeCandidate = top2[1]?.name || '(Second candidate)';
+
+      const maxPct = computeMaxPctForRace(selectedRaceName);
+      selectedRaceConfig = { greenCandidate, orangeCandidate, maxPct };
+
+      showLegend(selectedRaceName, selectedRaceConfig);
+
+      if (geojsonLayer) geojsonLayer.setStyle(mapStyle);
+    }
+
+    function showLegend(raceName, cfg) {
+      const el = document.getElementById('raceLegend');
+      const maxTxt = (cfg.maxPct && cfg.maxPct > 50) ? `${cfg.maxPct.toFixed(1)}%` : '≥50%';
+
+      el.innerHTML = `
+        <div class="legend-title">${raceName}</div>
+        <div class="legend-row">
+          <span class="swatch" style="background:${GREEN};"></span>
+          <span>${cfg.greenCandidate}</span>
+        </div>
+        <div class="legend-row">
+          <span class="swatch" style="background:${ORANGE};"></span>
+          <span>${cfg.orangeCandidate}</span>
+        </div>
+        <div class="legend-note">
+          White = <b>50.0%</b>, full color = <b>${maxTxt}</b> (race-specific max).<br>
+          Fill color shows the <b>top vote getter</b> in each shape.
+        </div>
+      `;
+      el.classList.add('visible');
+    }
+
+    function hideLegend() {
+      const el = document.getElementById('raceLegend');
+      el.classList.remove('visible');
+      el.innerHTML = '';
+    }
+
+    // -----------------------------
+    // Map styling
+    // -----------------------------
+    function mapStyle(feature) {
+      const isPrecincts = (activeDatasetKey === 'precincts');
+
+      // --- Border settings ---
+      // precincts: no borders
+      // neighborhoods: keep white borders
+      const borderColor = 'white';
+      const borderWeight = isPrecincts ? 1 : 2;
+
+      // Default style when no race selected
+      if (!selectedRaceName || !selectedRaceConfig) {
+        return {
+          fillColor: '#0066cc',
+          weight: borderWeight,
+          opacity: 0.7,   // stroke opacity
+          color: borderColor,
+          dashArray: '',
+          fillOpacity: 0.3
+        };
+      }
+
+      // Race-selected style
+      const win = winnerForFeature(feature, selectedRaceName);
+      if (!win) {
+        return {
+          fillColor: '#dddddd',
+          weight: borderWeight,
+          opacity: isPrecincts ? 0 : 0.6,
+          color: borderColor,
+          dashArray: '',
+          fillOpacity: 0.35
+        };
+      }
+
+      let base = null;
+      if (win.winnerName === selectedRaceConfig.greenCandidate) base = GREEN;
+      else if (win.winnerName === selectedRaceConfig.orangeCandidate) base = ORANGE;
+      else base = '#999999';
+
+      const maxPct = Number(selectedRaceConfig.maxPct || 50);
+      const denom = Math.max(0.0001, (maxPct - 50.0));
+      const t = clamp01((Math.max(50.0, win.pct) - 50.0) / denom);
+      const fill = lerpColor(WHITE, base, t);
+
+      return {
+        fillColor: fill,
+        weight: borderWeight,
+        opacity: isPrecincts ? 0 : 0.75,
+        color: borderColor,
+        dashArray: '',
+        fillOpacity: 0.65
+      };
+    }
+
+
+    // -----------------------------
+    // Layer creation + interactions
+    // -----------------------------
+    function displayMap() {
+      // function highlightFeature(e) {
+      //   const layer = e.target;
+      //   layer.setStyle({ weight: 4, color: '#ff6600' });
+
+      //   if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+      //     layer.bringToFront();
+      //   }
+
+      //   if (!pinned) {
+      //     renderFeature(layer.feature);
+      //   }
+      // }
+
+      // function resetHighlight(e) {
+      //   geojsonLayer.resetStyle(e.target);
+      //   if (!pinned) showCitywide();
+      // }
+
+      function highlightFeature(e) {
+        const layer = e.target;
+
+        // If this is the pinned layer, keep the pinned outline (don’t orange-highlight it)
+        if (pinnedLayer && layer === pinnedLayer) {
+          applyPinnedOutline(layer);
+        } else {
+          layer.setStyle({ weight: 4, color: '#ff6600', opacity: 1 });
+          if (layer.bringToFront) layer.bringToFront();
+        }
+
+        if (!pinned) {
+          renderFeature(layer.feature);
+        }
+      }
+
+      function resetHighlight(e) {
+        const layer = e.target;
+
+        // If this is the pinned layer, DO NOT reset; re-apply pinned outline
+        if (pinnedLayer && layer === pinnedLayer) {
+          geojsonLayer.resetStyle(layer);   // reset any hover styling first
+          applyPinnedOutline(layer);        // then restore pinned outline
+        } else {
+          geojsonLayer.resetStyle(layer);
+        }
+
+        if (!pinned) {
+          showCitywide();
+        }
+      }
+
+      // function togglePin(e) {
+      //   const layer = e.target;
+      //   const feature = layer.feature;
+      //   const panel = document.getElementById('infoPanel');
+
+      //   // If clicking the currently pinned feature => unpin
+      //   if (pinned && pinnedFeature === feature) {
+      //     pinned = false;
+      //     pinnedFeature = null;
+      //     panel.classList.remove('pinned');
+
+      //     // NEW: remove bold outline on the map
+      //     clearPinnedOutline();
+
+      //     showCitywide();
+      //     return;
+      //   }
+
+      //   // Otherwise pin to the clicked feature (or switch pin)
+      //   pinned = true;
+      //   pinnedFeature = feature;
+      //   panel.classList.add('pinned');
+      //   renderFeature(feature);
+
+      //   // NEW: if there was a previously pinned layer, clear its outline
+      //   clearPinnedOutline();
+
+      //   // NEW: set and apply outline to the newly pinned layer
+      //   pinnedLayer = layer;
+      //   applyPinnedOutline(pinnedLayer);
+      // }
+
+      function togglePin(e) {
+        const layer = e.target;
+        const feature = layer.feature;
+        const panel = document.getElementById('infoPanel');
+
+        // Unpin if clicking the currently pinned feature
+        if (pinned && pinnedFeature === feature) {
+          pinned = false;
+          pinnedFeature = null;
+          panel.classList.remove('pinned');
+
+          // remove bold outline on map
+          clearPinnedOutline();
+
+          showCitywide();
+          return;
+        }
+
+        // Pin a new feature (or switch pin)
+        pinned = true;
+        pinnedFeature = feature;
+        panel.classList.add('pinned');
+        renderFeature(feature);
+
+        // clear previous pinned outline if any
+        clearPinnedOutline();
+
+        // set new pinned layer and apply outline
+        pinnedLayer = layer;
+        applyPinnedOutline(pinnedLayer);
+      }
+
+
+      geojsonLayer = L.geoJSON(electionData, {
+        style: mapStyle,
+        onEachFeature: function(feature, layer) {
+          layer.on({
+            mouseover: highlightFeature,
+            mouseout: resetHighlight,
+            click: togglePin
+          });
+        }
+      }).addTo(map);
+    }
+  </script>
+</body>
+</html>
