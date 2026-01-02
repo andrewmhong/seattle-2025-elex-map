@@ -29,6 +29,53 @@
       z-index: 2000;
     }
 
+    .title-box{
+      position:absolute;
+      top:10px;
+      left:400px;            
+      right:330px;           
+      background:white;
+      padding:12px 14px;
+      border-radius:10px;
+      box-shadow:0 2px 10px rgba(0,0,0,0.2);
+      z-index:1300;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+    .title-box .title{
+      font-size:42px;
+      font-weight:800;
+      color:#222;
+      line-height:1.1;
+    }
+    .title-box .byline{
+      font-size:16px;
+      color:#555;
+      font-weight:600;
+    }
+    .title-box .desc{
+      font-size:12px;
+      color:#666;
+      line-height:1.25;
+    }
+    .title-box a{
+      color:#0066cc;
+      text-decoration:none;
+      font-weight:600;
+    }
+    .title-box a:hover{
+      text-decoration:underline;
+    }
+
+    @media (max-width: 1100px){
+      .title-box{
+        left:10px;
+        right:10px;
+        top:calc(10px + 260px);  /* pushes below left menu on small screens */
+      }
+    }
+
     .info-panel {
       position: absolute;
       top: 10px;
@@ -229,6 +276,28 @@
 <body>
   <div id="map"></div>
   <div class="loading" id="loading">Loading election data...</div>
+
+  <div class="title-box" id="titleBox">
+    <div class="title">Seattle 2025 Election Results</div>
+    <div class="byline">By Andrew Hong |
+      <a href="https://x.com/andrewmhong" target="_blank" rel="noopener noreferrer">@andrewmhong</a>
+      • 
+      <a href="https://www.linkedin.com/in/andrew-hong-7364b4192/" target="_blank" rel="noopener noreferrer">
+        LinkedIn
+      </a>
+       • 
+      <a href="https://github.com/andrewmhong" target="_blank" rel="noopener noreferrer">
+        GitHub
+      </a>
+    </div>
+    <div class="desc">
+      Work in progress. Aiming to add in ability to visualize differences across races and years; and a “correlations” feature similar to
+      <a href="https://electionmapsf.com/correlations/" target="_blank" rel="noopener noreferrer">
+        electionmapsf.com/correlations
+      </a>.
+    </div>
+  </div>
+
 
   <!-- Left menu: dataset toggle + races -->
   <div class="race-menu" id="raceMenu">
